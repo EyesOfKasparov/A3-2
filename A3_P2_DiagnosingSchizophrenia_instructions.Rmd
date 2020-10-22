@@ -45,7 +45,19 @@ N.N.N.N.B. A more advanced solution could rely on the tidymodels set of packages
 
 ```{r}
 
+pacman::p_load(tidyverse, caret, lme4)
 
+raw_df <- read_csv("../a3-1/finalish_data.csv")
 
+raw_df %>%
+  mutate(
+    Language = as.factor(Language),
+    Diagnosis = as.factor(Diagnosis)
+  )
+
+raw_df %>%
+  lme4::glmer(Diagnosis ~ freq_iqr + (1|real_ID), )
+
+# raw_df$freq_iqr
 ```
 
