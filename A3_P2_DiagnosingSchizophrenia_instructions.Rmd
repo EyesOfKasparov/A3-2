@@ -7,6 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+# This is a comment, thank you God! 
 ```
 
 ## Assignment 3 - Part 2 - Diagnosing schizophrenia from voice
