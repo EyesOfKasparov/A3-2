@@ -44,20 +44,82 @@ N.N.N.N.B. A more advanced solution could rely on the tidymodels set of packages
 
 
 ```{r}
+pacman::p_load(tidyverse, caret, lme4, broom.mixed, cvms, groupdata2)
+```
 
-pacman::p_load(tidyverse, caret, lme4)
+# Helper functions
+```{r}
+logit2prob <- function(x) {
+  exp(x) / (1 - exp(x))
+}
 
+predict_to_tibble <- function(model) {
+  predict(model, type = "response", re.form = NA) %>%
+    as_tibble() %>%
+    mutate(row_num = row_number(),
+           pred = if_else(value > 0.5, "Schizophrenia", "Control")) %>%
+    select(row_num, pred)
+}
+
+```
+
+# Processing
+```{r}
 raw_df <- read_csv("../a3-1/finalish_data.csv")
 
 raw_df %>%
   mutate(
     Language = as.factor(Language),
-    Diagnosis = as.factor(Diagnosis)
+    diagnosis = as.factor(diagnosis),
+    real_ID = as.factor(real_ID),
+    freq_iqr = as.numeric(freq_iqr)
   )
 
-raw_df %>%
-  lme4::glmer(Diagnosis ~ freq_iqr + (1|real_ID), )
+raw_df$Diagnosis <- as.factor(raw_df$Diagnosis)
 
-# raw_df$freq_iqr
+danish_df <- raw_df %>%
+  filter(Language == "Danish") %>% 
+  mutate(row_num = row_number(),
+         real_ID = as.factor(real_ID))
+
+simple_model <- lme4::glmer(formula = Diagnosis ~ freq_iqr + (1|real_ID) + (1|Study), data = danish_df, family = "binomial")
+
 ```
+
+
+# Predicting
+```{r}
+result <- simple_model %>% 
+  augment %>% 
+  mutate(pred = logit2prob(.fitted),
+         result = as.factor(if_else(pred < 0.5, "Control", "Schizophrenia"))) %>% 
+  select(result, Diagnosis)
+
+caret::confusionMatrix(result$result, result$Diagnosis)
+
+```
+
+# Cross-validation
+```{r}
+d <- fold(danish_df,
+          k = 5,
+          cat_col = "Diagnosis",
+          id_col = "real_ID") %>% 
+  arrange(.folds)
+
+cross <- cvms::cross_validate(data = d, 
+                     formulas = "Diagnosis ~ freq_iqr",
+                     REML = F,
+                     family = "binomial",
+                     fold_cols = ".folds")
+
+
+cross$Results[[1]]
+cross$`Confusion Matrix`
+
+library(ggplot2)
+
+
+```
+
 
