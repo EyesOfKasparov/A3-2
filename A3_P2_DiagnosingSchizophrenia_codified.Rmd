@@ -53,6 +53,8 @@ library(lmerTest)
 library(broom.mixed)
 library(e1071)
 library(caret)
+#install.packages("pROC")
+library(pROC)
 
 
 
@@ -72,6 +74,10 @@ predict_to_tibble <- function(model) {
     mutate(row_num = row_number(), 
            pred = if_else(value > 0.5, "Schizophrenia", "Control")) %>% 
     select(row_num, pred)
+}
+
+my_auc <- function(obs, pred) {
+  Metrics::auc(as.numeric(obs), as.numeric(pred))  
 }
 ```
 
@@ -99,10 +105,15 @@ summary(simple_model)
 
 result <- predict_to_tibble(simple_fixed) %>% 
   left_join(danish_dat) %>% 
-  select(pred, Diagnosis) 
+  select(pred, Diagnosis) %>% 
+  mutate(pred = factor(pred, levels = levels(Diagnosis)))
 
 
-result
+
+confusionMatrix(result$pred, result$Diagnosis)
+
+
+my_auc(result$Diagnosis, result$pred)
 ```
 
 # Let's get the tidymodels going (no mixed effects, cuz prediction bby!!!!)
@@ -161,5 +172,14 @@ lr_tune_results <- lr_workflow %>%
 lr_tune_results$.notes
 
 ```
+
+### Let's not try tidymodels (for the splitting)
+```{r}
+library(cvms)
+library(groupdata2)
+
+
+```
+
 
 
