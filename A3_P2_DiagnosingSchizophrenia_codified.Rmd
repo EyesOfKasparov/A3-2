@@ -51,8 +51,10 @@ library(lmerTest)
 library(broom.mixed)
 library(e1071)
 library(caret)
+library(glmnet)
 library(cvms)
 library(groupdata2)
+library(tidymodels)
 #install.packages("pROC")
 library(pROC)
 
@@ -94,7 +96,7 @@ danish_dat <- raw_dat %>%
   rename(pitch_variability = freq_iqr) %>% 
   mutate(Diagnosis = as_factor(Diagnosis),
          row_num = row_number()) %>% 
-  select(-c(file_name, diagnosis, Participant.x, trial_nr))
+  select(-c(file_name, diagnosis, Participant.x, trial_nr, soundname, Study, Language, Participant.y))
 
 names(danish_dat)
 ```
@@ -123,74 +125,18 @@ confusionMatrix(result$pred, result$Diagnosis)
 my_auc(result$Diagnosis, result$pred)
 ```
 
-# Let's get the tidymodels going (no mixed effects, cuz prediction bby!!!!)
-```{r}
-# Create dataset with one row (JESUS!) per customer
-sum_dat <- danish_dat %>% 
-  group_by(real_ID) %>% 
-  summarise(Diagnosis = first(Diagnosis), 
-            across(where(is.numeric), ~mean(.x, na.rm=T))) %>% 
-  select(-c(row_num, Participant.x, Participant.y, Study, VerbalIQ, NonVerbalIQ, TotalIQ, Age)) %>% 
-  replace_na(list(SANS = 0, SAPS = 0))
-
-
-sum_dat %>% 
-  summarise(across(.fns = ~sum(is.na(.x)))) 
-  
-
-split_personality <- initial_split(sum_dat, strata = Diagnosis)
-skizo_train <- training(split_personality)
-skizo_test <- testing(split_personality)
-
-skizo_cv <- vfold_cv(skizo_train, v=2, repeats=1, strata = Diagnosis) 
-  
-
-
-```
-## Let's try tidymodels
-```{r}
-
-# Defining recipe + preprocessing
-skizo_recipe <- recipe(Diagnosis ~ ., data = sum_dat) %>% 
-  step_normalize(all_numeric()) 
-
-# Defining model 
-lr_mod <- 
-  logistic_reg(penalty = 1, 
-               mixture = 1) %>% # LASSO
-  set_engine("glmnet") %>% 
-  set_mode("classification") %>% 
-  fit(Diagnosis ~ ., new_data = danish_dat)
-          
-# Create the workflow
-lr_workflow <- workflow() %>% 
-  add_recipe(skizo_recipe) %>% 
-  add_model(lr_mod)
-
-
-# Tune model #
-# Define grid
-lr_reg_grid <- tibble(penalty = 10^seq(-1, 1, length.out = 1))
-
-# Actually tuning!
-lr_tune_results <- lr_workflow %>% 
-  tune_grid(resamples = skizo_cv, 
-            metrics = metric_set(accuracy, roc_auc))
-
-lr_tune_results$.notes
-
-```
 
 ### Let's not try tidymodels (for the splitting)
 ```{r}
 library(cvms)
+
 library(groupdata2)
 
 fold_model_data <- danish_dat %>% 
   mutate(real_ID = as_factor(real_ID)) %>% 
   fold(
       data = ., k = 10,
-      cat_col = 'diagnosis',
+      cat_col = 'Diagnosis',
       id_col = 'real_ID',
       num_fold_cols = 3,
       handle_existing_fold_cols = "keep"
@@ -210,7 +156,56 @@ CV5 <- cross_validate(
 
 ### Trying penalized logistic regression
 ```{r}
-model
+get_outcome <- function(formula) {
+  str_extract(formula, "\\w+(?=\\s?\\~)")
+}
+
+get_predictors <- function(formula) {
+  x <- str_split(formula, "~")
+  x <- x[[1]][2]
+  x <- x %>% str_remove_all(" ")
+  x <- str_split(x, "\\+")
+  return(x)  
+}
+
+split_formula <- function(formula) {
+  formula %>% 
+    as.character %>% 
+    str_split("\\s\\+\\s")
+}
+
+
+lasso_log_model_fn <- function(train_data, formula, hyperparameters) {
+  hyperparameters <- update_hyperparameters(hyperparameters = hyperparameters, required = "lambda")
+  
+  # Create vectors for selection
+  outcome <- split_formula(formula)[[2]]
+  predictors <- split_formula(formula)[[3]]
+  
+  
+  # NB: ASSUMES OUTCOME IS IN FIRST VARIABLE
+  y <- train_data %>% 
+    pull(outcome) %>% 
+    as.integer()
+  x <- train_data[, predictors] %>% 
+    as.matrix
+  
+  glmnet(x, y, family = "binomial", alpha = 1, lambda = hyperparameters[["lambda"]])
+}
+
+
+tidy_lasso_log_model <- function(train_data, formula, hyperparameters) {
+   hyperparameters <- update_hyperparameters(hyperparameters = hyperparameters, required = "lambda")
+   lasso_model <- 
+     logistic_reg(penalty = hyperparameters[["lambda"]], mixture = 1) %>%
+     set_engine("glmnet") %>% 
+     fit(formula, train_data)
+   lasso_model
+}
+
+
+t
+
 ```
 
 
