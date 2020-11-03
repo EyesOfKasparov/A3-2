@@ -198,7 +198,7 @@ fold_data_master <- fold_model_data %>%
   drop_na()
 
 
-hparams <- list("lambda" = 10^seq(-6, -2, length.out = 10))
+hparams <- list("lambda" = 10^seq(-3, -1, length.out = 10))
 
 
 
@@ -251,10 +251,21 @@ evaluation_results <- danish_test %>%
          prediction = .pred_class)
 
 metrics(evaluation_results, true_label, prediction)
+```
 
+### Plotting ROC curve
+```{r}
+#install.packages("ROCR")
+library(ROCR)
 
+predicts <- predict(best_model, danish_test, type = "prob") %>% 
+  pull(.pred_Schizophrenia) %>% 
+  list
 
+preds <- ROCR::prediction(predicts, list(evaluation_results$true_label))
+perf <- performance(preds,"tpr","fpr")
 
+plot(perf, colorize=T)
 ```
 
 
