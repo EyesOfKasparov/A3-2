@@ -233,14 +233,36 @@ cv_master %>%
   filter(AUC == max(AUC))
 
 
-best_model %>% 
+best_parameters <- best_model %>% 
   tidy %>% 
   filter(estimate != 0) %>% 
   mutate(estimate = round(estimate, 5)) %>% 
-  arrange(desc(abs(estimate))) %>% 
-  View()
+  arrange(desc(abs(estimate))) 
+
+View(best_parameters)
+
+confusionMatrix()
 
 ```
+
+### Plotting "best" parameters
+```{r}
+colour_palette <- c("positive" = "#ffa500", 
+                    "negative" = "#9acbff")
+
+best_parameters %>% 
+  mutate(direction = if_else(estimate > 0, "positive", "negative")) %>% 
+  ggplot(aes(x = reorder(term, abs(estimate)), y = estimate, fill = direction)) + 
+  geom_col(width = 0.7) + 
+  scale_fill_manual(values = colour_palette, 
+                    limits = names(colour_palette)) + 
+  coord_flip() + 
+  theme_bw() + 
+  labs(title = "The 'Best' Predictors", x = "Predictors")
+
+names(best_parameters)
+```
+
 
 ```{r}
 preds <- predict(best_model, danish_test)
@@ -252,7 +274,11 @@ evaluation_results <- danish_test %>%
          prediction = .pred_class)
 
 metrics(evaluation_results, true_label, prediction)
+
+
+confusionMatrix(evaluation_results$true_label, evaluation_results$prediction)
 ```
+
 
 ### Plotting ROC curve
 ```{r}
@@ -267,6 +293,8 @@ preds <- ROCR::prediction(predicts, list(evaluation_results$true_label))
 perf <- performance(preds,"tpr","fpr")
 
 plot(perf, colorize=T)
+
+1 - my_auc(evaluation_results$true_label, evaluation_results$prediction)
 ```
 
 
