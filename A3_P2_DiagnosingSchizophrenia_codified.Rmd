@@ -44,6 +44,7 @@ N.N.N.N.B. A more advanced solution could rely on the tidymodels set of packages
 
 ## Load libraries + data
 ```{r}
+set.seed(123)
 library(tidyverse)
 library(lmerTest)
 library(broom.mixed)
