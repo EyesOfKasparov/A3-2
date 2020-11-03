@@ -89,28 +89,56 @@ normalize <- function(x) {
 
 ### Getting dataset
 ```{r}
-danish_dat <- raw_dat %>% 
-  filter(Language == "Danish") %>% 
-  rename(pitch_variability = freq_iqr) %>% 
-  mutate(Diagnosis = as_factor(Diagnosis)) %>% 
-  select(-c(file_name, diagnosis, Participant.x, trial_nr, soundname, Study, Language, Participant.y, Gender))
+danish_dat <- raw_dat %>%
+  filter(Language == "Danish") %>%
+  rename(pitch_variability = freq_iqr) %>%
+  mutate(Diagnosis = as_factor(Diagnosis), 
+         real_ID = as_factor(real_ID)) %>%
+  select(
+    -c(
+      file_name,
+      diagnosis,
+      Participant.x,
+      trial_nr,
+      soundname,
+      #Study,
+      Language,
+      Participant.y,
+      Gender, 
+      Age, 
+      Education
+    )
+  )
 
-names(danish_dat)
+danish_partition <- partition(danish_dat, p = 0.7, 
+                              cat_col = "Diagnosis", 
+                              id_col = "real_ID")
+
+
+danish_train <- danish_partition[[1]]
+danish_test <- danish_partition[[2]] %>% 
+  rename(ASD = "ASD (speakingtime/nsyll)", 
+         articulation = "articulation rate (nsyll / phonationtime)",
+         speechrate = "speechrate (nsyll/dur)",
+         phonationtime = "phonationtime (s)", 
+         dur = "dur (s)")
+
+
 ```
 
 
 ### Simple model
 ```{r}
-simple_model <- glmer(Diagnosis ~ pitch_variability + (1|real_ID) + (1|Study), data = danish_dat, family = "binomial", control=lme4::glmerControl(optimizer="bobyqa"))
+simple_train <- danish_train %>% 
+  mutate(pitch_variability = normalize(pitch_variability), 
+         row_num = row_number())
 
 
-simple_fixed <- glm(Diagnosis ~ pitch_variability, danish_dat, family = "binomial")
+simple_fixed <- glm(Diagnosis ~ pitch_variability, simple_train, family = "binomial")
 
-
-summary(simple_model)
 
 result <- predict_to_tibble(simple_fixed) %>% 
-  left_join(danish_dat) %>% 
+  left_join(simple_train) %>% 
   select(pred, Diagnosis) %>% 
   mutate(pred = factor(pred, levels = levels(Diagnosis)))
 
@@ -125,26 +153,15 @@ my_auc(result$Diagnosis, result$pred)
 
 ### Let's not try tidymodels (for the splitting)
 ```{r}
-fold_model_data <- danish_dat %>% 
-  mutate(real_ID = as_factor(real_ID)) %>% 
+fold_model_data <- danish_train %>% 
   fold(
-      data = ., k = 10,
+      data = ., k = 5,
       cat_col = 'Diagnosis',
       id_col = 'real_ID',
       num_fold_cols = 3,
       handle_existing_fold_cols = "keep"
     ) 
 
-
-model_formulas <- c("Diagnosis ~ pitch_variability", "Diagnosis ~ freq_mean")
-
-CV5 <- cross_validate(
-  data = fold_model_data,
-  formulas = model_formulas,
-  preprocessing = "standardize",
-  fold_cols = paste0(".folds_", 1:3),
-  family = 'binomial', 
-)
 ```
 
 ### Trying penalized logistic regression
@@ -176,20 +193,19 @@ fold_data_master <- fold_model_data %>%
          speechrate = "speechrate (nsyll/dur)",
          phonationtime = "phonationtime (s)", 
          dur = "dur (s)") %>% 
-  select(-real_ID) %>% 
+  select(-real_ID, -Study, -study_nr) %>% 
   select(where(~mean(is.na(.x)) < 0.1)) %>% 
   drop_na()
 
-names(fold_data_master)
 
-hparams <- list("lambda" = 10^seq(-5, -1, length.out = 10))
+hparams <- list("lambda" = 10^seq(-6, -2, length.out = 10))
 
 
 
 cv_master <- 
   cross_validate_fn(
     data = fold_data_master, 
-    formulas = "Diagnosis ~ .", 
+    formulas = "Diagnosis ~ (.)^2", 
     model_fn = tidy_lasso_log_model, 
     predict_fn = tidy_lasso_predict, 
     preprocess_fn = preprocess_functions("standardize"),
@@ -204,21 +220,42 @@ best_lambda <- cv_master %>%
   pull(HParams) %>% 
   unlist()
 
+
 best_lambda
+
+best_model <- tidy_lasso_log_model(remove_folds(fold_data_master),
+                                   Diagnosis ~ .^2, 
+                                   list("lambda" = best_lambda))
 
 
 cv_master %>% 
-  filter(AUC == max(AUC)) %>% 
-  pull(Coefficients)
+  filter(AUC == max(AUC))
 
-best_model <- tidy_lasso_log_model(remove_folds(fold_data_master), Diagnosis ~ ., list("lambda" = best_lambda))
 
 best_model %>% 
   tidy %>% 
   filter(estimate != 0) %>% 
-  arrange(desc(abs(estimate)))
+  mutate(estimate = round(estimate, 5)) %>% 
+  arrange(desc(abs(estimate))) %>% 
+  View()
+
 ```
 
+```{r}
+preds <- predict(best_model, danish_test)
+
+evaluation_results <- danish_test %>% 
+  bind_cols(preds) %>% 
+  mutate(Diagnosis = as_factor(Diagnosis)) %>% 
+  select(true_label = Diagnosis, 
+         prediction = .pred_class)
+
+metrics(evaluation_results, true_label, prediction)
+
+
+
+
+```
 
 
 
